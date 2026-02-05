@@ -1,0 +1,721 @@
+
+/**********************************************************************************************************************
+ * Copyright (c) 2025 Renesas Electronics Corporation and/or its affiliates
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *********************************************************************************************************************/
+/**********************************************************************************************************************
+ * File Name    : main.c
+ * Description  : Example program for using lwip
+ *********************************************************************************************************************/
+
+/**********************************************************************************************************************
+ * Includes   <System Includes> , "Project Includes"
+ *********************************************************************************************************************/
+#include "r_smc_entry.h"
+#include "r_ether_rx_if.h"
+#include "r_ether_rx_pinset.h"
+
+#include "main.h"
+
+#include "lwip/sys.h"
+#include "lwip/init.h"
+#include "lwip/opt.h"
+#include "lwip/netif.h"
+#include "lwip/timeouts.h"
+#include "lwip/udp.h"
+#include "lwip/dhcp.h"
+#include "lwip/prot/dhcp.h"
+#include "lwip/etharp.h"
+
+#include "lwip/igmp.h"
+#include "netif/ethernet.h"
+
+#include "r_lwip_driver_rx_if.h"
+#include "r_lwip_driver_rx_config.h"
+
+#if BSP_CFG_MCU_PART_ENCRYPTION_INCLUDED == true ||  BSP_CFG_MCU_PART_FUNCTION == (0x11)
+#include "r_tsip_rx_if.h"
+#include "r_tsip_rx_config.h"
+#endif /* BSP_CFG_MCU_PART_ENCRYPTION_INCLUDED == true ||  BSP_CFG_MCU_PART_FUNCTION == (0x11) */
+
+/**********************************************************************************************************************
+ * Macro definitions
+ *********************************************************************************************************************/
+
+
+/**********************************************************************************************************************
+ * Typedef definitions
+ *********************************************************************************************************************/
+
+/**********************************************************************************************************************
+ * Exported global variables
+ *********************************************************************************************************************/
+
+/**********************************************************************************************************************
+ * Private (static) variables and functions
+ *********************************************************************************************************************/
+void main(void);
+
+extern uint8_t g_link_change[ETHER_CHANNEL_MAX];
+extern uint8_t g_link_status[ETHER_CHANNEL_MAX];
+
+static err_t r_lwip_driver_low_level_init_2 (struct netif *netif);
+static err_t r_lwip_driver_ethernetif_init_2 (struct netif *netif);
+
+static struct netif s_netif;
+static struct netif s_netif_2;
+
+static uint32_t s_ethernet_link_timer = 0;
+
+#define RX_BUF_SIZE 1000
+
+volatile uint8_t data_received = 0;
+uint8_t  g_udp_data[RX_BUF_SIZE];
+uint16_t g_udp_len = 0;
+
+static uint32_t s_message_count;
+
+/**********************************************************************************************************************
+ * Function Name  @fn   Ethernet_Link_Periodic_Handle
+ *********************************************************************************************************************/
+void Ethernet_Link_Periodic_Handle(void)
+{
+    /* Ethernet Link every 100ms */
+    if (sys_now() - s_ethernet_link_timer >= 100)
+    {
+        s_ethernet_link_timer = sys_now();
+        R_LWIP_DRIVER_EthernetLinkCheck(&s_netif);
+        R_LWIP_DRIVER_EthernetLinkCheck(&s_netif_2);
+    }
+}
+/**********************************************************************************************************************
+ * End of function Ethernet_Link_Periodic_Handle
+ *********************************************************************************************************************/
+
+/**********************************************************************************************************************
+ * Function Name  @fn   udp_receive_callback
+ *********************************************************************************************************************/
+void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
+{
+//    static char str[101]="";
+//    if(p->len < 100)
+//    {
+//    	data_received=1;
+//        strncpy(str,p->payload,p->len);
+//        str[p->len] = '\0';
+//        printf("Received data: %s\n",str);
+//    }
+//    /* Free receive pbuf */
+//    pbuf_free(p);
+
+    if (p == NULL) {
+        return;
+    }
+
+    /* Check size to avoid overflow */
+    if (p->tot_len <= RX_BUF_SIZE) {
+
+        /* Safely copy full UDP payload (handles chained pbufs) */
+        pbuf_copy_partial(p, g_udp_data, p->tot_len, 0);
+
+        g_udp_len = p->tot_len;
+        data_received = 1;
+    }
+
+    /* Free lwIP buffer AFTER copying */
+    pbuf_free(p);
+}
+/**********************************************************************************************************************
+ * End of function udp_receive_callback
+ *********************************************************************************************************************/
+
+/**********************************************************************************************************************
+ * Function Name  @fn   main
+ *********************************************************************************************************************/
+void main(void)
+{
+//    e_lwip_drv_return_t res;
+//    uint32_t cmt_ch = 0;
+//
+//#if LWIP_DHCP
+//    uint32_t counts = 0;
+//#endif
+//
+//    ip_addr_t ipaddr;
+//    ip_addr_t netmask;
+//    ip_addr_t gw;
+//
+//    struct udp_pcb *upcb = NULL;
+//    struct udp_pcb *upcb2 = NULL;
+//    uint32_t timer_count2 = 0;
+//
+//    struct pbuf *p = NULL;
+//    u8_t   data[100] = "hello";
+//
+//    ip_addr_t DestIPaddr;
+//    err_t err;
+//
+//#if BSP_CFG_MCU_PART_ENCRYPTION_INCLUDED == true ||  BSP_CFG_MCU_PART_FUNCTION == (0x11)
+//    R_TSIP_Open(NULL, NULL);
+//#endif /* BSP_CFG_MCU_PART_ENCRYPTION_INCLUDED == true ||  BSP_CFG_MCU_PART_FUNCTION == (0x11) */
+//    res = R_LWIP_DRIVER_Open(&cmt_ch, 1);
+//
+//    while(LWIP_DRV_SUCCESS != res)
+//    {
+//        ; /* Nothing to do */
+//    }
+//
+//    /* Initialize the LwIP stack */
+//    lwip_init();
+//
+//    /* Setting Netif */
+//#if LWIP_DHCP
+//    ip_addr_set_zero_ip4(&ipaddr);
+//    ip_addr_set_zero_ip4(&netmask);
+//    ip_addr_set_zero_ip4(&gw);
+//#else
+//    /* IP address default setting */
+//    IP4_ADDR(&ipaddr, TEST_IP_ADDR0, TEST_IP_ADDR1, TEST_IP_ADDR2, TEST_IP_ADDR3);
+//    IP4_ADDR(&netmask, TEST_NETMASK_ADDR0, TEST_NETMASK_ADDR1 , TEST_NETMASK_ADDR2, TEST_NETMASK_ADDR3);
+//    IP4_ADDR(&gw, TEST_GW_ADDR0, TEST_GW_ADDR1, TEST_GW_ADDR2, TEST_GW_ADDR3);
+//#endif
+//
+//    /* add the network interface */
+//    netif_add(&s_netif, &ipaddr, &netmask, &gw, NULL, &r_lwip_driver_ethernetif_init, &netif_input);
+//
+//    /* WAIT_LOOP */
+//    while (ETHER_SUCCESS != R_ETHER_CheckLink_ZC (LWIP_DRIVER_CFG_ETH_DRV_CH))
+//    {
+//        R_BSP_NOP();
+//    }
+//
+//    /* Setting Netif2 */
+//#if LWIP_DHCP
+//    ip_addr_set_zero_ip4(&ipaddr);
+//    ip_addr_set_zero_ip4(&netmask);
+//    ip_addr_set_zero_ip4(&gw);
+//#else
+//    /* IP address default setting */
+//    IP4_ADDR(&ipaddr, TEST_IP_ADDR0_2, TEST_IP_ADDR1_2, TEST_IP_ADDR2_2, TEST_IP_ADDR3_2);
+//    IP4_ADDR(&netmask, TEST_NETMASK_ADDR0, TEST_NETMASK_ADDR1 , TEST_NETMASK_ADDR2, TEST_NETMASK_ADDR3);
+//    IP4_ADDR(&gw, TEST_GW_ADDR0, TEST_GW_ADDR1, TEST_GW_ADDR2, TEST_GW_ADDR3);
+//#endif
+//
+//    /* add the network interface */
+//    netif_add(&s_netif_2, &ipaddr, &netmask, &gw, NULL, &r_lwip_driver_ethernetif_init_2, &netif_input);
+//
+//    /* WAIT_LOOP */
+//    while (ETHER_SUCCESS != R_ETHER_CheckLink_ZC (ETHER_CH_2))
+//    {
+//        R_BSP_NOP();
+//    }
+//
+//    /*  Registers the default network interface */
+//    netif_set_default(&s_netif);
+//    netif_set_up(&s_netif);
+//    netif_set_up(&s_netif_2);
+//
+//    /* Create a new UDP control block  */
+//    upcb = udp_new();
+//
+//    if (upcb != NULL)
+//    {
+//        /*assign destination IP address */
+//        IP4_ADDR(&DestIPaddr, TEST_DEST_IP_ADDR0, TEST_DEST_IP_ADDR1, TEST_DEST_IP_ADDR2, TEST_DEST_IP_ADDR3);
+//
+//        /* configure destination IP address and port */
+//        err= udp_connect(upcb, &DestIPaddr, TEST_UDP_CLIENT_PORT);
+//
+//        if (err == ERR_OK)
+//        {
+//            udp_bind_netif(upcb, &s_netif);
+//
+//            /* Set a receive callback for the upcb */
+//            udp_recv(upcb, udp_receive_callback, NULL);
+//        }
+//    }
+//
+//    upcb2 = udp_new();
+//
+//    if (upcb2 != NULL)
+//    {
+//        /*assign destination IP address */
+//        IP4_ADDR(&DestIPaddr, TEST_DEST_IP_ADDR0, TEST_DEST_IP_ADDR1, TEST_DEST_IP_ADDR2, TEST_DEST_IP_ADDR3);
+//
+//        /* configure destination IP address and port */
+//        err= udp_connect(upcb2, &DestIPaddr, TEST_UDP_CLIENT_PORT);
+//
+//        if (err == ERR_OK)
+//        {
+//            udp_bind_netif(upcb2, &s_netif_2);
+//
+//            /* Set a receive callback for the upcb */
+//            udp_recv(upcb2, udp_receive_callback, NULL);
+//        }
+//    }
+//
+//#if LWIP_DHCP
+//    /* WAIT_LOOP */
+//    while (!dhcp_supplied_address(&s_netif))
+//    {
+//        Ethernet_Link_Periodic_Handle();
+//
+//        sys_check_timeouts();
+//
+//        R_LWIP_DRIVER_Input(&s_netif);
+//
+//        if(netif_is_link_up(&s_netif) && counts == 0)
+//        {
+//            counts++;
+//            dhcp_start(&s_netif);
+//        }
+//    }
+//
+//    counts = 0;
+//    while (!dhcp_supplied_address(&s_netif_2))
+//    {
+//        Ethernet_Link_Periodic_Handle();
+//
+//        sys_check_timeouts();
+//
+//        R_LWIP_DRIVER_Input(&s_netif_2);
+//
+//        if(netif_is_link_up(&s_netif_2) && counts == 0)
+//        {
+//            counts++;
+//            dhcp_start(&s_netif_2);
+//        }
+//    }
+//    counts = 0;
+//#endif
+//
+//    while (1)
+//    {
+//#if TEST_CODE
+//        /* Reset ether test code */
+//        if (0 == (sys_now() % 10000))
+//        {
+//            R_LWIP_DRIVER_EthernetClose(&s_netif);
+//            printf("reset the Ether CH %d \n", s_netif.name[1] - '0');
+//
+//            netif_remove(&s_netif);
+//            netif_add(&s_netif, &ipaddr, &netmask, &gw, NULL, &r_lwip_driver_ethernetif_init, &netif_input);
+//            netif_set_default(&s_netif);
+//            netif_set_up(&s_netif);
+//        }
+//#endif /* TEST_CODE */
+//
+//        Ethernet_Link_Periodic_Handle();
+//
+//        sys_check_timeouts();
+//
+//        R_LWIP_DRIVER_Input(&s_netif);
+//
+//        R_LWIP_DRIVER_Input(&s_netif_2);
+//
+//        if (sys_now() - timer_count2 > 1000)
+//        {
+//            timer_count2 = sys_now();
+//
+//            sprintf((char*)data, "sending udp client message %d", (int)s_message_count++);
+//            /* allocate pbuf from pool*/
+//            p = pbuf_alloc(PBUF_TRANSPORT, strlen((char*) data), PBUF_POOL);
+//
+//            if (p != NULL)
+//            {
+//                /* copy data to pbuf */
+//                pbuf_take(p, (char*) data, strlen((char*) data));
+//
+//                /* send udp data */
+//                udp_send(upcb, p);
+//
+//                /* free pbuf */
+//                pbuf_free(p);
+//            }
+//
+//            sprintf((char*)data, "sending udp client message %d", (int)s_message_count++);
+//            /* allocate pbuf from pool*/
+//            p = pbuf_alloc(PBUF_TRANSPORT, strlen((char*) data), PBUF_POOL);
+//
+//            if (p != NULL)
+//            {
+//                /* copy data to pbuf */
+//                pbuf_take(p, (char*) data, strlen((char*) data));
+//
+//                /* send udp data */
+//                udp_send(upcb2, p);
+//
+//                /* free pbuf */
+//                pbuf_free(p);
+//            }
+//        }
+//    }
+
+	main_scheduler();
+}
+/**********************************************************************************************************************
+ * End of function main
+ *********************************************************************************************************************/
+
+/**********************************************************************************************************************
+ * Function Name  @fn   r_lwip_driver_low_level_init_2
+ *********************************************************************************************************************/
+static err_t r_lwip_driver_low_level_init_2(struct netif *netif)
+{
+    ether_param_t eth_param = { 0 };
+    ether_return_t ether_ret;
+    uint32_t eth_ch = ETHER_CH_2;
+
+    /* Clear the link status flags */
+    g_link_change[eth_ch] =  0;
+    g_link_status[eth_ch] =  0;
+
+    /* set MAC hardware address length */
+    netif->hwaddr_len = ETH_HWADDR_LEN;
+
+    /* set MAC hardware address */
+    netif->hwaddr[0] = ETH_MAC_ADDR0;
+    netif->hwaddr[1] = ETH_MAC_ADDR1;
+    netif->hwaddr[2] = ETH_MAC_ADDR2;
+    netif->hwaddr[3] = ETH_MAC_ADDR3;
+    netif->hwaddr[4] = ETH_MAC_ADDR4;
+    netif->hwaddr[5] = ETH_MAC_ADDR5;
+
+    /* maximum transfer unit */
+    netif->mtu = LWIP_DRIVER_CFG_MTU;
+
+    /* device capabilities */
+    /* don't set NETIF_FLAG_ETHARP if this device is not an ethernet one */
+    netif->flags |= NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP;
+
+    eth_param.channel = eth_ch;
+
+    R_ETHER_Control(CONTROL_POWER_ON, eth_param);
+
+#if (ETHER_CH_2 == 0)
+#if (ETHER_CFG_MODE_SEL == 0)
+    R_ETHER_PinSet_ETHERC0_MII();
+#if (ETHER_CFG_CH0_PHY_ACCESS == 1)
+    R_ETHER_PinSet_ETHERC1_MII();
+#endif /* ETHER_CFG_CH0_PHY_ACCESS == 1 */
+#elif (ETHER_CFG_MODE_SEL == 1)
+    R_ETHER_PinSet_ETHERC0_RMII();
+#if (ETHER_CFG_CH0_PHY_ACCESS == 1)
+    R_ETHER_PinSet_ETHERC1_RMII();
+#endif /* ETHER_CFG_CH0_PHY_ACCESS == 1 */
+#endif /* ETHER_CFG_MODE_SEL == 0 */
+
+#elif (ETHER_CH_2 == 1)
+#if (ETHER_CFG_MODE_SEL == 0)
+    R_ETHER_PinSet_ETHERC1_MII();
+#if (ETHER_CFG_CH1_PHY_ACCESS == 0)
+    R_ETHER_PinSet_ETHERC0_MII();
+#endif
+#elif (ETHER_CFG_MODE_SEL == 1)
+    R_ETHER_PinSet_ETHERC1_RMII();
+#if (ETHER_CFG_CH1_PHY_ACCESS == 0)
+    R_ETHER_PinSet_ETHERC0_RMII();
+#endif /* ETHER_CFG_CH1_PHY_ACCESS == 0 */
+#endif /* ETHER_CFG_MODE_SEL == 0 */
+
+#endif /* ETHER_CH_2 == 0 */
+
+    /* Open the Ethernet channel.
+     Note that the API function R_ETHER_Initial must be called in advance. */
+    ether_ret = R_ETHER_Open_ZC2(eth_ch, netif->hwaddr, ETHER_FLAG_OFF);
+
+    if (ETHER_SUCCESS != ether_ret)
+    {
+        return ERR_IF;
+    }
+
+    return ERR_OK;
+}
+/**********************************************************************************************************************
+ * End of function r_lwip_driver_low_level_init_2
+ *********************************************************************************************************************/
+
+/**********************************************************************************************************************
+ * Function Name  @fn   r_lwip_driver_ethernetif_init_2
+ *********************************************************************************************************************/
+static err_t r_lwip_driver_ethernetif_init_2(struct netif *netif)
+{
+    err_t err = ERR_OK;
+
+    LWIP_ASSERT("netif != NULL", (netif != NULL));
+
+  #if LWIP_NETIF_HOSTNAME
+    /* Initialize interface hostname */
+    netif->hostname = "LWIP_HOST_NAME";
+  #endif /* LWIP_NETIF_HOSTNAME */
+
+    netif->name[0] = 'c';
+    netif->name[1] = (char) (ETHER_CH_2 + '0');
+    /* We directly use etharp_output() here to save a function call.
+     * You can instead declare your own function an call etharp_output()
+     * from it if you have to do some checks before sending (e.g. if link
+     * is available...) */
+    netif->output     = etharp_output;
+    netif->linkoutput = r_lwip_driver_low_level_output;
+
+    /* initialize the hardware */
+    err = r_lwip_driver_low_level_init_2(netif);
+
+    return err;
+}
+
+
+/**********************************************************************************************************************
+ * End of function r_lwip_driver_ethernetif_init_2
+ *********************************************************************************************************************/
+
+e_lwip_drv_return_t res;
+   uint32_t cmt_ch = 0;
+
+#if LWIP_DHCP
+   uint32_t counts = 0;
+#endif
+
+   ip_addr_t ipaddr;
+   ip_addr_t netmask;
+   ip_addr_t gw;
+
+   struct udp_pcb *upcb = NULL;
+   struct udp_pcb *upcb2 = NULL;
+   uint32_t timer_count2 = 0;
+
+   struct pbuf *p = NULL;
+   u8_t   data[1000] = "hello";
+
+   ip_addr_t DestIPaddr1;
+   ip_addr_t DestIPaddr2;
+
+   err_t err;
+
+#if BSP_CFG_MCU_PART_ENCRYPTION_INCLUDED == true ||  BSP_CFG_MCU_PART_FUNCTION == (0x11)
+   R_TSIP_Open(NULL, NULL);
+#endif /* BSP_CFG_MCU_PART_ENCRYPTION_INCLUDED == true ||  BSP_CFG_MCU_PART_FUNCTION == (0x11) */
+
+uint32_t udp_socketlayer_init()
+{
+
+    res = R_LWIP_DRIVER_Open(&cmt_ch, 1);
+
+    while(LWIP_DRV_SUCCESS != res)
+    {
+        ; /* Nothing to do */
+    }
+
+    /* Initialize the LwIP stack */
+    lwip_init();
+
+    /* Setting Netif */
+#if LWIP_DHCP
+    ip_addr_set_zero_ip4(&ipaddr);
+    ip_addr_set_zero_ip4(&netmask);
+    ip_addr_set_zero_ip4(&gw);
+#else
+    /* IP address default setting */
+    IP4_ADDR(&ipaddr, TEST_IP_ADDR0, TEST_IP_ADDR1, TEST_IP_ADDR2, TEST_IP_ADDR3);
+    IP4_ADDR(&netmask, TEST_NETMASK_ADDR0, TEST_NETMASK_ADDR1 , TEST_NETMASK_ADDR2, TEST_NETMASK_ADDR3);
+    IP4_ADDR(&gw, TEST_GW_ADDR0, TEST_GW_ADDR1, TEST_GW_ADDR2, TEST_GW_ADDR3);
+#endif
+
+    /* add the network interface */
+    netif_add(&s_netif, &ipaddr, &netmask, &gw, NULL, &r_lwip_driver_ethernetif_init, &netif_input);
+
+    /* WAIT_LOOP */
+    while (ETHER_SUCCESS != R_ETHER_CheckLink_ZC (LWIP_DRIVER_CFG_ETH_DRV_CH))
+    {
+        R_BSP_NOP();
+    }
+
+    /* Setting Netif2 */
+#if LWIP_DHCP
+    ip_addr_set_zero_ip4(&ipaddr);
+    ip_addr_set_zero_ip4(&netmask);
+    ip_addr_set_zero_ip4(&gw);
+#else
+    /* IP address default setting */
+    IP4_ADDR(&ipaddr, TEST_IP_ADDR0_2, TEST_IP_ADDR1_2, TEST_IP_ADDR2_2, TEST_IP_ADDR3_2);
+    IP4_ADDR(&netmask, TEST_NETMASK_ADDR0, TEST_NETMASK_ADDR1 , TEST_NETMASK_ADDR2, TEST_NETMASK_ADDR3);
+    IP4_ADDR(&gw, TEST_GW_ADDR0, TEST_GW_ADDR1, TEST_GW_ADDR2, TEST_GW_ADDR3);
+#endif
+
+    /* add the network interface */
+    netif_add(&s_netif_2, &ipaddr, &netmask, &gw, NULL, &r_lwip_driver_ethernetif_init_2, &netif_input);
+
+    /* WAIT_LOOP */
+    while (ETHER_SUCCESS != R_ETHER_CheckLink_ZC (ETHER_CH_2))
+    {
+        R_BSP_NOP();
+    }
+
+    /*  Registers the default network interface */
+    netif_set_default(&s_netif);
+    netif_set_up(&s_netif);
+    netif_set_up(&s_netif_2);
+
+   return 1;
+}
+
+uint32_t udp_layer_close()
+{
+
+    return 1;
+
+}
+
+uint32_t udp_bind_eth(uint32_t fd, uint16_t port, const uint8_t *ip_addr)
+{
+    /* Create a new UDP control block  */
+    upcb = udp_new();
+
+    if (upcb != NULL)
+    {
+        /*assign destination IP address */
+        IP4_ADDR(&DestIPaddr1, TEST_DEST_IP_ADDR0, TEST_DEST_IP_ADDR1, TEST_DEST_IP_ADDR2, TEST_DEST_IP_ADDR3);
+
+        udp_bind(upcb,IP_ADDR_ANY,TEST_UDP_SERVER1_PORT);
+
+        /* configure destination IP address and port */
+        err= udp_connect(upcb, &DestIPaddr1, TEST_UDP_CLIENT_PORT1);
+
+        if (err == ERR_OK)
+        {
+            udp_bind_netif(upcb, &s_netif);
+
+            /* Set a receive callback for the upcb */
+            udp_recv(upcb, udp_receive_callback, NULL);
+        }
+    }
+
+    upcb2 = udp_new();
+
+    if (upcb2 != NULL)
+    {
+        /*assign destination IP address */
+        IP4_ADDR(&DestIPaddr2, TEST_DEST_IP1_ADDR0, TEST_DEST_IP1_ADDR1, TEST_DEST_IP1_ADDR2, TEST_DEST_IP1_ADDR3);
+
+        udp_bind(upcb2,IP_ADDR_ANY,TEST_UDP_SERVER2_PORT);
+
+        /* configure destination IP address and port */
+        err= udp_connect(upcb2, &DestIPaddr2, TEST_UDP_CLIENT_PORT2);
+
+        if (err == ERR_OK)
+        {
+            udp_bind_netif(upcb2, &s_netif_2);
+
+            /* Set a receive callback for the upcb */
+            udp_recv(upcb2, udp_receive_callback, NULL);
+        }
+    }
+
+	return 1;
+}
+
+uint32_t  Get_value_from_buffer(uint8_t *RcedData)
+{
+	uint32_t data_len=0;
+	if (data_received == 1)
+	{
+	    memcpy(RcedData, g_udp_data, g_udp_len);
+	    data_len = g_udp_len;
+
+	    memset(g_udp_data, 0, RX_BUF_SIZE);
+	    g_udp_len = 0;
+	    data_received = 0;
+	    return data_len;
+	}
+   return 0;
+}
+
+uint32_t udp_receive_eth(uint32_t fd, uint8_t *recd_msg, const uint32_t max_buffer_len/*, struct sockaddr_in *sender*/)
+{
+	uint32_t Data_Len=0;
+
+	Data_Len=Get_value_from_buffer(recd_msg);
+	return Data_Len;
+}
+
+uint32_t udp_send_eth(uint32_t fd, const uint8_t *msg, uint32_t msg_len, const uint8_t *host, uint16_t port)
+{
+
+	        Ethernet_Link_Periodic_Handle();
+
+	        sys_check_timeouts();
+
+	        R_LWIP_DRIVER_Input(&s_netif);
+
+	        R_LWIP_DRIVER_Input(&s_netif_2);
+
+	        if (sys_now() - timer_count2 > 1000)
+	        {
+	            timer_count2 = sys_now();
+
+//	            sprintf((char*)data, "sending udp client message %d", (int)s_message_count++);
+
+//	            for(uint8_t indx=0;indx<200;indx++)
+//	            {
+//	            	data[indx]=indx;
+//	            }
+
+//	            sprintf((char*)data, "sending udp client message %d", (int)s_message_count++);
+
+	            /* allocate pbuf from pool*/
+	            p = pbuf_alloc(PBUF_TRANSPORT, (uint16_t)msg_len, PBUF_POOL);
+//	            p = pbuf_alloc(PBUF_TRANSPORT, strlen((char*) data), PBUF_POOL);
+
+	            if (p != NULL)
+	            {
+	                /* copy data to pbuf */
+	                pbuf_take(p, msg, msg_len);
+
+	                /* send udp data */
+	                udp_send(upcb, p);
+
+	                /* free pbuf */
+	                pbuf_free(p);
+	            }
+
+//	            sprintf((char*)data, "sending udp client message %d", (int)s_message_count++);
+//	            /* allocate pbuf from pool*/
+//	            p = pbuf_alloc(PBUF_TRANSPORT, strlen((char*) data), PBUF_POOL);
+
+	            p = pbuf_alloc(PBUF_TRANSPORT, msg_len, PBUF_POOL);
+
+	            if (p != NULL)
+	            {
+	                /* copy data to pbuf */
+	                pbuf_take(p, msg, msg_len);
+
+	                /* send udp data */
+	                udp_send(upcb2, p);
+
+	                /* free pbuf */
+	                pbuf_free(p);
+	            }
+	        }
+    return 1;
+}
+
+void main_scheduler()
+{
+
+		uint8_t data[10]={0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A};
+
+		udp_socketlayer_init();
+//		udp_layer_close();
+		udp_bind_eth(1,1,data);
+		uint32_t msg_length=10;
+
+		while(1)
+		{
+			udp_receive_eth(1,data,5);
+
+
+
+			udp_send_eth(1,data,msg_length,data,1);
+	    }
+}

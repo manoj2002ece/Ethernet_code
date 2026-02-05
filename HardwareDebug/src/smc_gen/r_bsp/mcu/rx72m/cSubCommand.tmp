@@ -1,0 +1,27 @@
+-isa=rxv3
+-fpu
+-dpfpu
+-MAKEUD="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\HardwareDebug\src\smc_gen\r_bsp\mcu\rx72m"
+-include="C:\Program Files (x86)\Renesas\RX\3_7_0\/include"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_bsp"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\general"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_config"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_pincfg"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_cmt_rx\src"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_ether_rx"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_cmt_rx"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_lwip_driver_rx"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_lwip_rx\src\include"
+-include="C:\Users\Manoj M\Downloads\rx72m_rsk_lwip_driver_udp_client\src\smc_gen\r_lwip_driver_rx\src"
+-asmopt=-bank
+-lang=c99
+-utf8
+-nomessage
+-output=obj
+-obj_path="src/smc_gen/r_bsp/mcu/rx72m"
+-debug
+-outcode=utf8
+-optimize=0
+-tfu=intrinsic
+-nologo
